@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var dataStore map[string]string = make(map[string]string)
+
 func main() {
 	fmt.Println("TCP server")
 
@@ -73,11 +75,21 @@ func handleMessage(conn net.Conn) {
 
 	case "set":
 		{
+			if noOfStrings < 3 {
+				conn.Write(wrongNumberOfArgumentsError(command))
+			}
 
+			conn.Write(handleSetCommand(string(bulkStrings[4]), string(bulkStrings[6])))
 		}
 
 	case "get":
 		{
+
+			if noOfStrings < 2 {
+				conn.Write(wrongNumberOfArgumentsError(command))
+			}
+
+			conn.Write(handleGetCommand(string(bulkStrings[4])))
 
 		}
 
@@ -111,6 +123,23 @@ func handleDefaultCase(command string) []byte {
 	respErrorMessage := fmt.Sprintf("-ERR unknown command '%v'\r\n", command)
 
 	return []byte(respErrorMessage)
+}
+
+// EX: Resp array *3\r\n$3\r\set\r\n$3\r\nkey\r\n$3\r\nval\r\n
+func handleSetCommand(key string, value string) []byte {
+	dataStore[key] = value
+
+	return []byte("+OK\r\n")
+}
+
+func handleGetCommand(key string) []byte {
+	value, ok := dataStore[key]
+
+	if !ok {
+		return []byte("$-1\r\n")
+	}
+
+	return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(value), value))
 }
 
 // Error message: (error) ERR wrong number of arguments for 'echo' command
