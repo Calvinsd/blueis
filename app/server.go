@@ -7,9 +7,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
-var dataStore map[string]string = make(map[string]string)
+type Value struct {
+	data      string
+	expiresAt time.Time
+}
+
+var dataStore map[string]Value = make(map[string]Value)
 
 func main() {
 	fmt.Println("TCP server")
@@ -75,11 +81,25 @@ func handleMessage(conn net.Conn) {
 
 	case "set":
 		{
-			if noOfStrings < 3 {
+			if noOfStrings < 3 || noOfStrings > 5 {
 				conn.Write(wrongNumberOfArgumentsError(command))
 			}
 
-			conn.Write(handleSetCommand(string(bulkStrings[4]), string(bulkStrings[6])))
+			if noOfStrings == 3 {
+				conn.Write(handleSetCommand(string(bulkStrings[4]), string(bulkStrings[6])))
+				return
+			}
+
+			if noOfStrings == 5 && strings.ToLower(string(bulkStrings[8])) == "px" {
+				expiresIn, err := strconv.Atoi(string(bulkStrings[10]))
+
+				if err != nil {
+					os.Exit(1)
+				}
+
+				conn.Write(handleSetCommandWithExpiry(string(bulkStrings[4]), string(bulkStrings[6]), expiresIn))
+			}
+
 		}
 
 	case "get":
@@ -127,7 +147,19 @@ func handleDefaultCase(command string) []byte {
 
 // EX: Resp array *3\r\n$3\r\set\r\n$3\r\nkey\r\n$3\r\nval\r\n
 func handleSetCommand(key string, value string) []byte {
-	dataStore[key] = value
+	dataStore[key] = Value{
+		data: value,
+	}
+
+	return []byte("+OK\r\n")
+}
+
+func handleSetCommandWithExpiry(key string, value string, expiresIn int) []byte {
+
+	dataStore[key] = Value{
+		data:      value,
+		expiresAt: time.Now().Add(time.Millisecond * time.Duration(expiresIn)),
+	}
 
 	return []byte("+OK\r\n")
 }
@@ -139,7 +171,12 @@ func handleGetCommand(key string) []byte {
 		return []byte("$-1\r\n")
 	}
 
-	return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(value), value))
+	if !value.expiresAt.IsZero() && time.Now().After(value.expiresAt) {
+		delete(dataStore, key)
+		return []byte("$-1\r\n")
+	}
+
+	return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(value.data), value.data))
 }
 
 // Error message: (error) ERR wrong number of arguments for 'echo' command
